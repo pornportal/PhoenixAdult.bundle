@@ -20,7 +20,7 @@ def search(results, lang, siteNum, searchData):
             results.Append(MetadataSearchResult(id='%s|%d' % (curID, siteNum), name='%s [%s] %s' % (titleNoFormatting, PAsearchSites.getSearchSiteName(siteNum), releaseDate), score=score, lang=lang))
 
     sceneID = searchData.title.split()[0]
-    if unicode(sceneID, 'utf-8').isdigit():
+    if PAsearchSites.safeUnicode(sceneID).isnumeric():
         sceneURL = PAsearchSites.getSearchBaseURL(siteNum) + '/video/watch/' + sceneID
         req = PAutils.HTTPRequest(sceneURL)
         detailsPageElements = HTML.ElementFromString(req.text)

@@ -1,5 +1,17 @@
 import PAsiteList
 import PAutils
+import os, string, hashlib, base64, re, plistlib, unicodedata, traceback
+
+
+def safeUnicode(text):
+    if text is None:
+        return ""
+    else:
+        try:
+            return unicode(text, 'utf-8')
+        except TypeError as e:
+            Log("Unicode error on '" + repr(text) + "': " + repr(e))
+            return unicode(str(text), 'utf-8')
 
 
 def getSearchSiteName(siteNum):
@@ -29,6 +41,7 @@ def getSearchSearchURL(siteNum):
 
 
 def getSiteNumByFilter(searchFilter):
+    Log("^^^^^^^ try reading siteId from: " + str(searchFilter))
     searchResults = []
     searchFilter = re.sub(r'[^a-z0-9]', '', searchFilter.lower())
     for siteNum in PAsiteList.searchSites:
@@ -47,7 +60,7 @@ def getSiteNumByFilter(searchFilter):
     return None
 
 
-def getSearchSettings(mediaTitle):
+def normalizeSiteName(mediaTitle):
     Log('mediaTitle w/ possible abbreviation: %s' % mediaTitle)
 
     for abbreviation, full in PAsiteList.abbreviations:
@@ -57,6 +70,13 @@ def getSearchSettings(mediaTitle):
             break
 
     Log('mediaTitle w/ possible abbrieviation fixed: %s' % mediaTitle)
+
+    return mediaTitle
+
+
+def getSearchSettings(mediaTitle):
+
+    mediaTitle = normalizeSiteName(mediaTitle)
 
     result = {
         'siteNum': None,
@@ -120,7 +140,12 @@ def getSearchSettings(mediaTitle):
             result['siteName'] = site
             result['searchTitle'] = searchTitle
             result['searchDate'] = searchDate
+        else:
+            Log('Could not match: %s' % mediaTitle)
+            result['siteNum'] = siteNum
+            result['siteName'] = site
 
+    Log("return SearchSettings: " + repr(result))
     return result
 
 
@@ -138,3 +163,13 @@ def posterAlreadyExists(posterUrl, metadata):
             return True
 
     return False
+
+def findMetadataDirs(media):
+    part = media.items[0].parts[0]
+    filepath = str(os.path.abspath(part.file))
+    dirpath = str(os.path.dirname(filepath))
+    dirname = str(os.path.basename(dirpath))
+    rawMetadataDirs = [ os.path.realpath(x) for x in [ dirpath, dirpath + '/../metadata', dirpath + '/../../metadata', dirpath + '/../metadata/' + dirname, dirpath + '/../../metadata/' + dirname ] ]
+    metadataSearchDirs = [ x for x in rawMetadataDirs if os.path.exists(x) ]
+
+    return metadataSearchDirs

@@ -165,7 +165,7 @@ import networkMetadataAPI
 searchSites = {
     0: ('BlackedRaw', 'https://www.blackedraw.com', '/api'),
     1: ('Blacked', 'https://www.blacked.com', '/api'),
-    2: ('Brazzers', 'http://www.brazzers.com', 'https://site-api.project1service.com'),
+    2: ('Brazzers', 'https://site-ma.brazzers.com', 'https://site-api.project1service.com'),
     3: ('MetadataAPI', 'https://metadataapi.net', 'https://api.metadataapi.net'),
     4: (),
     5: ('My Friends Hot Mom', 'https://tour.naughtyamerica.com', 'https://i6p9q9r18e-3.algolianet.com/1/indexes/*/queries'),

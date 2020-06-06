@@ -1,5 +1,8 @@
 import PAsearchSites
 import PAutils
+import json
+import os, io
+import glob
 
 
 def get_Token(siteNum):
@@ -26,6 +29,22 @@ def get_Token(siteNum):
     return token
 
 
+def findMetadata(media, sceneID):
+    metadataSearchDirs = PAsearchSites.findMetadataDirs(media)
+    metadataSearchFileName = "/**/*-%s-*.json" % (sceneID)
+    Log("Trying to find metadata via json files: " + str(metadataSearchDirs) + ", SearchQuery: " + metadataSearchFileName)
+    items = []
+    if len(metadataSearchDirs) > 0:
+        for d in metadataSearchDirs:
+            globStr = d + metadataSearchFileName
+            Log("Trying glob: " + globStr)
+            for m in glob.glob(globStr):
+                with io.open(m) as json_file:
+                    item = json.load(json_file)
+                    items.append(item)
+    return items
+
+
 def search(results, lang, siteNum, searchData):
     token = get_Token(siteNum)
     headers = {
@@ -34,12 +53,38 @@ def search(results, lang, siteNum, searchData):
 
     sceneID = None
     parts = searchData.title.split()
-    if unicode(parts[0], 'UTF-8').isdigit():
-        sceneID = parts[0]
+    firstPart = PAsearchSites.safeUnicode(parts[0])
+    if firstPart.isdigit():
+        sceneID = firstPart
         searchData.title = searchData.title.replace(sceneID, '', 1).strip()
 
+    Log('****** Project1 ID ' + str(sceneID) + ' *******')
+
+    def handleSearchResultItem(results, searchResult):
+        titleNoFormatting = searchResult['title']
+        releaseDate = parse(searchResult['dateReleased']).strftime('%Y-%m-%d')
+        curID = searchResult['id']
+        siteName = searchResult['brand'].title()
+        subSite = ''
+        if 'collections' in searchResult and searchResult['collections']:
+            subSite = searchResult['collections'][0]['name']
+        siteDisplay = '%s/%s' % (siteName, subSite) if subSite else siteName
+
+        if sceneID:
+            score = 100 - Util.LevenshteinDistance(sceneID, curID)
+        elif searchData.date:
+            score = 100 - Util.LevenshteinDistance(searchData.date, releaseDate)
+        else:
+            score = 100 - Util.LevenshteinDistance(searchData.title.lower(), titleNoFormatting.lower())
+
+        if sceneType == 'trailer':
+            titleNoFormatting = '[%s] %s' % (sceneType.capitalize(), titleNoFormatting)
+            score = score - 10
+
+        results.Append(MetadataSearchResult(id='%s|%d|%s' % (curID, siteNum, sceneType), name='%s [%s] %s' % (titleNoFormatting, siteDisplay, releaseDate), score=score, lang=lang))
+
     for sceneType in ['scene', 'movie', 'serie', 'trailer']:
-        if sceneID and not searchData.title:
+        if sceneID: # and not searchData.title:
             url = PAsearchSites.getSearchSearchURL(siteNum) + '/v2/releases?type=%s&id=%s' % (sceneType, sceneID)
         else:
             url = PAsearchSites.getSearchSearchURL(siteNum) + '/v2/releases?type=%s&search=%s' % (sceneType, searchData.encoded)
@@ -48,27 +93,13 @@ def search(results, lang, siteNum, searchData):
         if req:
             searchResults = req.json()['result']
             for searchResult in searchResults:
-                titleNoFormatting = searchResult['title']
-                releaseDate = parse(searchResult['dateReleased']).strftime('%Y-%m-%d')
-                curID = searchResult['id']
-                siteName = searchResult['brand'].title()
-                subSite = ''
-                if 'collections' in searchResult and searchResult['collections']:
-                    subSite = searchResult['collections'][0]['name']
-                siteDisplay = '%s/%s' % (siteName, subSite) if subSite else siteName
+                handleSearchResultItem(results, searchResult)
 
-                if sceneID:
-                    score = 100 - Util.LevenshteinDistance(sceneID, curID)
-                elif searchData.date:
-                    score = 100 - Util.LevenshteinDistance(searchData.date, releaseDate)
-                else:
-                    score = 100 - Util.LevenshteinDistance(searchData.title.lower(), titleNoFormatting.lower())
-
-                if sceneType == 'trailer':
-                    titleNoFormatting = '[%s] %s' % (sceneType.capitalize(), titleNoFormatting)
-                    score = score - 10
-
-                results.Append(MetadataSearchResult(id='%s|%d|%s' % (curID, siteNum, sceneType), name='%s [%s] %s' % (titleNoFormatting, siteDisplay, releaseDate), score=score, lang=lang))
+    # Fallback to json file
+    if len(results) < 1:
+        # Find metadata folder/file
+        for item in findMetadata(media, sceneID):
+            handleSearchResultItem(results, item['result'])
 
     return results
 
@@ -84,7 +115,16 @@ def update(metadata, lang, siteNum, movieGenres, movieActors):
     }
     url = PAsearchSites.getSearchSearchURL(siteNum) + '/v2/releases?type=%s&id=%s' % (sceneType, sceneID)
     req = PAutils.HTTPRequest(url, headers=headers)
-    detailsPageElements = req.json()['result'][0]
+    resultData = req.json()['result']
+    if len(resultData) > 0: 
+        detailsPageElements = resultData[0]
+    else:
+        # Fallback to metadata json file
+        metadataSearchDirs = PAsearchSites.findMetadataDirs(media)
+        detailsPageElements = findMetadata(media, sceneID)[0]['result']
+
+    # Studio
+    metadata.studio = detailsPageElements['brand'].title()
 
     # Title
     metadata.title = detailsPageElements['title']
@@ -121,6 +161,10 @@ def update(metadata, lang, siteNum, movieGenres, movieActors):
             isInCollection = True
             break
 
+    # This allows one to 'hide' the 'main' Site collection while still showing 'unsorted' stuff
+    if len(seriesNames) < 1:
+        seriesNames.insert(0, PAsearchSites.getSearchSiteName(siteNum) + " (Unsorted)")
+
     if not isInCollection:
         seriesNames.insert(0, PAsearchSites.getSearchSiteName(siteNum))
 
@@ -147,14 +191,40 @@ def update(metadata, lang, siteNum, movieGenres, movieActors):
         actorPageURL = PAsearchSites.getSearchSearchURL(siteNum) + '/v1/actors?id=%d' % actorLink['id']
 
         req = PAutils.HTTPRequest(actorPageURL, headers=headers)
-        actorData = req.json()['result'][0]
+        actorResultData = req.json()['result']
+        actorData = actorResultData[0]
+        if len(actorResultData) > 0:
+            actorData = actorResultData[0]
+        else:
+            # Try again via 'correct' brand
+            actorSiteNum = PAsearchSites.getSiteNumByFilter(detailsPageElements['brand'])
+            if actorSiteNum != siteNum:
+                Log("Could not find actor data, trying again with with brand '%s'" % (detailsPageElements['brand']))
+                token = get_Token(actorSiteNum)
+                headers = {
+                    'Instance': token,
+                }
+                
+                req = PAutils.HTTPRequest(actorPageURL, headers=headers)
+                actorResultData = req.json()['result']
+                if len(actorResultData) > 0:
+                    actorData = actorResultData[0]
+                else:
+                    actorData = None
+            else:
+                actorData = None 
 
-        actorName = actorData['name']
-        actorPhotoURL = ''
-        if actorData['images'] and actorData['images']['profile']:
-            actorPhotoURL = actorData['images']['profile']['0']['xs']['url']
+        if actorData:
+            actorName = actorData['name']
+            actorPhotoURL = ''
+            if actorData['images'] and actorData['images']['profile']:
+                actorPhotoURL = actorData['images']['profile']['0']['xs']['url']
 
-        movieActors.addActor(actorName, actorPhotoURL)
+                movieActors.addActor(actorName, actorPhotoURL)
+        else:
+            Log("Could not find actor data (image) for ID '%s' and name '%s'" % (actorLink['id'], actorLink['name']))
+            actorName = actorLink['name']
+            movieActors.addActor(actorName, '')
 
     # Posters
     art = []
@@ -163,6 +233,11 @@ def update(metadata, lang, siteNum, movieGenres, movieActors):
             for image in detailsPageElements['images'][imageType]:
                 if image.isdigit():
                     art.append(detailsPageElements['images'][imageType][image]['xx']['url'])
+
+    for imageType in ['poster', 'cover']:
+        if 'parent' in detailsPageElements and 'images' in detailsPageElements['parent'] and imageType in detailsPageElements['parent']['images']:
+            for image in detailsPageElements['parent']['images'][imageType]:
+                art.append(image['xx']['url'])
 
     Log('Artwork found: %d' % len(art))
     for idx, posterUrl in enumerate(art, 1):

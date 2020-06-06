@@ -14,7 +14,7 @@ def getAlgolia(url, indexName, params):
 
 def search(results, lang, siteNum, searchData):
     sceneID = searchData.title.split(' ', 1)[0]
-    if unicode(sceneID, 'UTF-8').isdigit():
+    if PAsearchSites.safeUnicode(sceneID).isnumeric():
         searchData.title = searchData.title.replace(sceneID, '', 1).strip()
     else:
         sceneID = None
